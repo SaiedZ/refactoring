@@ -1,39 +1,18 @@
-
-# ==============================================
-#      IMPORTS
-# ==============================================
-
-## File Structure Related Imports
-import __future__
-
-__version__ = "1.01"
-__author__ = "John Fallot"
-
 import datetime
 import json
 import logging
 import os
 import random
-import re
 import time
 from contextlib import contextmanager, suppress
-from fnmatch import fnmatch
 from json.decoder import JSONDecodeError
-from os import PathLike, listdir, path
 from os.path import isdir
 from typing import Optional
+from scrape.fetch import fetch_terms_from_pdf_files
 
 import pandas as pd
-
-## Language Processing Related Imports
-import pdfplumber
-
-## Scraping Related Imports
 import requests
 from bs4 import BeautifulSoup
-from nltk import FreqDist
-from nltk.corpus import names, stopwords
-from nltk.tokenize import word_tokenize
 from requests.exceptions import HTTPError, RequestException
 from tqdm import tqdm
 
@@ -231,160 +210,6 @@ class JSONScrape(ScrapeRequest, slookup_code="json"):
         return {_key: item.get(_key, "") for _key in keys}
 
 
-class PDFScrape:
-    """The PDFScrape class takes the provided string from a prior list
-    comprehension of PDF files in a directory. From each pdf file, it parses the document
-    and returns metrics about its composition and relevance.
-    """
-
-    def download(self, search_text: str) -> dict:
-        self.search_text = search_text
-        self.preprints = []
-        with pdfplumber.open(self.search_text) as self.study:
-            self.n = len(self.study.pages)
-            self.pages_to_check = [page for page in self.study.pages][: self.n]
-            for page_number, page in enumerate(self.pages_to_check):
-                page = self.study.pages[page_number].extract_text(
-                    x_tolerance=3, y_tolerance=3
-                )
-                print(
-                    f"[sciscraper]: Processing Page {page_number} of {self.n-1} | {search_text}...",
-                    end="\r",
-                )
-                self.preprints.append(
-                    page
-                )  # Each page's string gets appended to preprint []
-
-            self.manuscripts = [
-                str(preprint).strip().lower() for preprint in self.preprints
-            ]
-            # The preprints are stripped of extraneous characters and all made lower case.
-            self.postprints = [
-                re.sub(r"\W+", " ", manuscript) for manuscript in self.manuscripts
-            ]
-            # The ensuing manuscripts are stripped of lingering whitespace and non-alphanumeric characters.
-            self.all_words = self.get_tokens()
-            self.research_word_overlap = self.get_research_words()
-            return self.get_data_entry()
-
-    def get_tokens(self) -> list:
-        """Takes a lowercase string, now removed of its non-alphanumeric characters.
-        It returns (as a list comprehension) a parsed and tokenized
-        version of the postprint, with stopwords and names removed.
-        """
-        self.stop_words = set(stopwords.words("english"))
-        self.name_words = set(names.words())
-        self.word_tokens = word_tokenize(str(self.postprints))
-        return [
-            w for w in self.word_tokens if not w in self.stop_words and self.name_words
-        ]  # Filters out the stopwords
-
-    def _overlap(self, li) -> list:
-        """Checks if token words match words in a provided list."""
-        return [w for w in li if w in self.all_words]
-
-    def get_target_words(self):
-        """Checks for words that match the user's primary query."""
-        self.target_words = [
-            "prosocial",
-            "design",
-            "intervention",
-            "reddit",
-            "humane",
-            "social media",
-            "user experience",
-            "nudge",
-            "choice architecture",
-            "user interface",
-            "misinformation",
-            "disinformation",
-            "Trump",
-            "conspiracy",
-            "dysinformation",
-            "users",
-            "Thaler",
-            "Sunstein",
-            "boost",
-        ]
-        self.target_word_overlap = self._overlap(self.target_words)
-        return self.target_word_overlap
-
-    def get_bycatch_words(self):
-        """Checks for words that often occur in conjunction with the
-        user's primary query, but are deemed undesirable.
-        """
-        self.bycatch_words = [
-            "psychology",
-            "pediatric",
-            "pediatry",
-            "autism",
-            "mental",
-            "medical",
-            "oxytocin",
-            "adolescence",
-            "infant",
-            "health",
-            "wellness",
-            "child",
-            "care",
-            "mindfulness",
-        ]
-        self.bycatch_word_overlap = self._overlap(self.bycatch_words)
-        return self.bycatch_word_overlap
-
-    def get_research_words(self):
-        """Checks for words that correspond to specific experimental designs."""
-        self.research_words = [
-            "big data",
-            "data",
-            "analytics",
-            "randomized controlled trial",
-            "RCT",
-            "moderation",
-            "community",
-            "social media",
-            "conversational",
-            "control",
-            "randomized",
-            "systemic",
-            "analysis",
-            "thematic",
-            "review",
-            "study",
-            "case series",
-            "case report",
-            "double blind",
-            "ecological",
-            "survey",
-        ]
-        self.research_word_overlap = self._overlap(self.research_words)
-        return self.research_word_overlap
-
-    def get_wordscore(self) -> int:
-        """Returns a score, which is the number of target words minus the number of undesirable words.
-        A positive score suggests that the paper is more likely than not to be a match.
-        A negative score suggests that the paper is likely to be unrelated to the user's primary query."""
-        return len(self.get_target_words()) - len(self.get_bycatch_words())
-
-    def get_doi(self) -> str:
-        """Approximates a possible DOI, assuming the file is saved in YYMMDD_DOI.pdf format."""
-        self.getting_doi = path.basename(self.search_text)
-        self.doi = self.getting_doi[7:-4]
-        self.doi = self.doi[:7] + "/" + self.doi[7:]
-        return self.doi
-
-    def get_data_entry(self) -> dict:
-        """Returns a dictionary entry. Ideally, this will someday work through a DataEntry class."""
-        self.data = {
-            "DOI": self.get_doi(),
-            "wordscore": self.get_wordscore(),
-            "frequency": FreqDist(self.all_words).most_common(5),
-            "study_design": FreqDist(self.research_word_overlap).most_common(3),
-        }
-
-        return self.data
-
-
 # ==============================================
 #    CONTEXT MANAGER METACLASS
 # ==============================================
@@ -502,35 +327,6 @@ class PubIDRequest(FileRequest, dlookup_code="pub"):
         ).join(self.src_title)
 
 
-class FolderRequest(FileRequest, dlookup_code="fold"):
-    """
-    The Folder class takes a directory and generates a list comprehension.
-    The list comprehension is scraped, and then returns a DataFrame.
-    Unlike other classes, it cannot undergo a SciScrape.
-    """
-
-    def __init__(self, target: PathLike[str], slookup_key: bool = False):
-        print(f"\n[sciscraper]: Getting files from folder: {target}")
-        self.target = target
-        if self.slookup_key:
-            raise Exception(
-                "This action is prohibited. \
-                You already have the files that this query would return."
-            )
-        self.slookup_key = slookup_key
-        self.scraper = PDFScrape()
-
-    def fetch_terms(self):
-        self.search_terms = [
-            path.join(self.target, file)
-            for file in listdir(self.target)
-            if fnmatch(path.basename(file), "*.pdf")
-        ]
-        return pd.DataFrame(
-            [self.scraper.download(file) for file in tqdm(self.search_terms)]
-        )
-
-
 # ==============================================
 #    EXPORTING, MAIN LOOP, AND MISCELLANY
 # ==============================================
@@ -549,10 +345,8 @@ def export(dataframe: Optional[pd.DataFrame]):
 
 def main():
     start = time.perf_counter()
-    file_request = FileRequest(target="../papers", slookup_key=False)
-    print(file_request.__class__.__name__)
-    # results = file_request.fetch_terms()
-    # export(results)
+    results = fetch_terms_from_pdf_files("../papers")
+    export(results)
     elapsed = time.perf_counter() - start
     msg_timestamp = f"\n[sciscraper]: Extraction finished in {elapsed} seconds.\n"
     logging.info(msg_timestamp)
