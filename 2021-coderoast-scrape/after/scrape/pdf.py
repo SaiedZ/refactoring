@@ -8,7 +8,7 @@ from nltk.tokenize import word_tokenize
 from scrape.scraper import ScrapeResult
 
 
-TARGET_WORDS = [
+TARGET_WORDS = {
     "prosocial",
     "design",
     "intervention",
@@ -28,9 +28,9 @@ TARGET_WORDS = [
     "Thaler",
     "Sunstein",
     "boost",
-]
+}
 
-BYCATCH_WORDS = [
+BYCATCH_WORDS = {
     "psychology",
     "pediatric",
     "pediatry",
@@ -45,9 +45,9 @@ BYCATCH_WORDS = [
     "child",
     "care",
     "mindfulness",
-]
+}
 
-RESEARCH_WORDS = [
+RESEARCH_WORDS = {
     "big data",
     "data",
     "analytics",
@@ -69,7 +69,22 @@ RESEARCH_WORDS = [
     "double blind",
     "ecological",
     "survey",
-]
+}
+
+
+def compute_filtered_tokens(text:list[str]) -> set[str]:
+    """Takes a lowercase string, now removed of its non-alphanumeric characters.
+    It returns (as a list comprehension) a parsed and tokenized
+    version of the postprint, with stopwords and names removed.
+    """
+    stop_words = set(stopwords.words("english"))
+    name_words = set(names.words())
+    word_tokens = word_tokenize("\n".join(text))
+    return {
+        w
+        for w in word_tokens
+        if w not in stop_words and name_words
+    }
 
 
 class PDFScrape:
@@ -100,60 +115,23 @@ class PDFScrape:
                 str(preprint).strip().lower() for preprint in self.preprints
             ]
             # The preprints are stripped of extraneous characters and all made lower case.
-            self.postprints = [
+            postprints = [
                 re.sub(r"\W+", " ", manuscript) for manuscript in self.manuscripts
             ]
             # The ensuing manuscripts are stripped of lingering whitespace and non-alphanumeric characters.
-            self.all_words = self.get_tokens()
-            self.research_word_overlap = self.get_research_words()
+            all_words = compute_filtered_tokens(postprints)
+
+            target_words = TARGET_WORDS.intersection(all_words)
+            bycatch_words = BYCATCH_WORDS.intersection(all_words)
+            word_score = len(target_words) - len(bycatch_words)
+            research_word_overlap = RESEARCH_WORDS.intersection(all_words)
+
             return ScrapeResult(
                 DOI=self.get_doi(),
-                wordscore=self.get_wordscore(),
-                frequency=FreqDist(self.all_words).most_common(5),
-                study_design=FreqDist(self.research_word_overlap).most_common(3),
+                wordscore=word_score,
+                frequency=FreqDist(all_words).most_common(5),
+                study_design=FreqDist(research_word_overlap).most_common(3),
             )
-
-    def get_tokens(self) -> list:
-        """Takes a lowercase string, now removed of its non-alphanumeric characters.
-        It returns (as a list comprehension) a parsed and tokenized
-        version of the postprint, with stopwords and names removed.
-        """
-        self.stop_words = set(stopwords.words("english"))
-        self.name_words = set(names.words())
-        self.word_tokens = word_tokenize(str(self.postprints))
-        return [
-            w for w in self.word_tokens if not w in self.stop_words and self.name_words
-        ]  # Filters out the stopwords
-
-    def _overlap(self, li) -> list:
-        """Checks if token words match words in a provided list."""
-        return [w for w in li if w in self.all_words]
-
-    def get_target_words(self):
-        """Checks for words that match the user's primary query."""
-        self.target_word_overlap = self._overlap(TARGET_WORDS)
-        return self.target_word_overlap
-
-    def get_bycatch_words(self):
-        """Checks for words that often occur in conjunction with the
-        user's primary query, but are deemed undesirable.
-        """
-
-        self.bycatch_word_overlap = self._overlap(BYCATCH_WORDS)
-        return self.bycatch_word_overlap
-
-    def get_research_words(self):
-        """Checks for words that correspond to specific experimental designs."""
-
-        self.research_word_overlap = self._overlap(RESEARCH_WORDS)
-        return self.research_word_overlap
-
-    def get_wordscore(self) -> int:
-        """Returns a score, which is the number of target words minus the number of undesirable words.
-        A positive score suggests that the paper is more likely than not to be a match.
-        A negative score suggests that the paper is likely to be unrelated to the user's primary query.
-        """
-        return len(self.get_target_words()) - len(self.get_bycatch_words())
 
     def get_doi(self) -> str:
         """Approximates a possible DOI, assuming the file is saved in YYMMDD_DOI.pdf format."""
