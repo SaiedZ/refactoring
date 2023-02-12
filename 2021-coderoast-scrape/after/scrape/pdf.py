@@ -72,7 +72,14 @@ RESEARCH_WORDS = {
 }
 
 
-def compute_filtered_tokens(text:list[str]) -> set[str]:
+def guess_doi(path_name: str) -> str:
+    """Approximates a possible DOI, assuming the file is saved in YYMMDD_DOI.pdf format."""
+    basename = path.basename(path_name)
+    doi = basename[7:-4]
+    return f"{doi[:7]}/{doi[7:]}"
+
+
+def compute_filtered_tokens(text: list[str]) -> set[str]:
     """Takes a lowercase string, now removed of its non-alphanumeric characters.
     It returns (as a list comprehension) a parsed and tokenized
     version of the postprint, with stopwords and names removed.
@@ -80,11 +87,12 @@ def compute_filtered_tokens(text:list[str]) -> set[str]:
     stop_words = set(stopwords.words("english"))
     name_words = set(names.words())
     word_tokens = word_tokenize("\n".join(text))
-    return {
-        w
-        for w in word_tokens
-        if w not in stop_words and name_words
-    }
+    return {w for w in word_tokens if w not in stop_words and name_words}
+
+
+def most_common_words(word_set: set[str], n: int) -> list[tuple[str, int]]:
+    """Takes a set of words and returns a list of tuples of the most common words and their frequencies."""
+    return FreqDist(word_set).most_common(n)
 
 
 class PDFScrape:
@@ -94,48 +102,39 @@ class PDFScrape:
     """
 
     def scrape(self, search_text: str) -> ScrapeResult:
-        self.search_text = search_text
-        self.preprints = []
-        with pdfplumber.open(self.search_text) as self.study:
-            self.n = len(self.study.pages)
-            self.pages_to_check = [page for page in self.study.pages][: self.n]
-            for page_number, page in enumerate(self.pages_to_check):
-                page = self.study.pages[page_number].extract_text(
+        preprints = []
+        with pdfplumber.open(search_text) as study:
+            n = len(study.pages)
+            pages_to_check = list(study.pages)[:n]
+            for page_number, page in enumerate(pages_to_check):
+                page = study.pages[page_number].extract_text(
                     x_tolerance=3, y_tolerance=3
                 )
                 print(
-                    f"[sciscraper]: Processing Page {page_number} of {self.n-1} | {search_text}...",
+                    f"[sciscraper]: Processing Page {page_number} of {n-1} | {search_text}...",
                     end="\r",
                 )
-                self.preprints.append(
+                preprints.append(
                     page
                 )  # Each page's string gets appended to preprint []
 
-            self.manuscripts = [
-                str(preprint).strip().lower() for preprint in self.preprints
-            ]
+            manuscripts = [str(preprint).strip().lower() for preprint in preprints]
             # The preprints are stripped of extraneous characters and all made lower case.
-            postprints = [
-                re.sub(r"\W+", " ", manuscript) for manuscript in self.manuscripts
-            ]
+            postprints = [re.sub(r"\W+", " ", manuscript) for manuscript in manuscripts]
             # The ensuing manuscripts are stripped of lingering whitespace and non-alphanumeric characters.
             all_words = compute_filtered_tokens(postprints)
 
+            doi = guess_doi(search_text)
             target_words = TARGET_WORDS.intersection(all_words)
             bycatch_words = BYCATCH_WORDS.intersection(all_words)
             word_score = len(target_words) - len(bycatch_words)
-            research_word_overlap = RESEARCH_WORDS.intersection(all_words)
+            research_word_intersection = RESEARCH_WORDS.intersection(all_words)
+            frequency = most_common_words(all_words, 5)
+            study_design = most_common_words(research_word_intersection, 3)
 
             return ScrapeResult(
-                DOI=self.get_doi(),
+                doi=doi,
                 wordscore=word_score,
-                frequency=FreqDist(all_words).most_common(5),
-                study_design=FreqDist(research_word_overlap).most_common(3),
+                frequency=frequency,
+                study_design=study_design,
             )
-
-    def get_doi(self) -> str:
-        """Approximates a possible DOI, assuming the file is saved in YYMMDD_DOI.pdf format."""
-        self.getting_doi = path.basename(self.search_text)
-        self.doi = self.getting_doi[7:-4]
-        self.doi = self.doi[:7] + "/" + self.doi[7:]
-        return self.doi
