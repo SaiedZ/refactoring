@@ -5,35 +5,35 @@ import pandas as pd
 from tqdm import tqdm
 
 from scrape.pdf import PDFScrape
-from scrape. scraper import Scraper
+from scrape.scraper import Scraper
+from scrape.config import ScrapeConfig
 
 
-def fetch_terms_from_pdf_files(paper_folder: str):
+def fetch_terms_from_pdf_files(config: ScrapeConfig) -> pd.DataFrame:
     search_terms = [
-        path.join(paper_folder, file)
-        for file in listdir(paper_folder)
+        path.join(config.paper_folder, file)
+        for file in listdir(config.paper_folder)
         if fnmatch(path.basename(file), "*.pdf")
     ]
-    scraper = PDFScrape()
+    scraper = PDFScrape(
+        research_words=config.research_words,
+        bycatch_words=config.bycatch_words,
+        target_words=config.target_words,
+    )
     return pd.DataFrame([scraper.scrape(file) for file in tqdm(search_terms)])
 
 
-def fetch_terms_from_doi(target: str, scraper: Scraper):
+def fetch_terms_from_doi(target: str, scraper: Scraper) -> pd.DataFrame:
     print(f"\n[sciscraper]: Getting entries from file: {target}")
     with open(target, newline="") as f:
         df = [doi for doi in pd.read_csv(f, usecols=["DOI"])["DOI"]]
-        search_terms = [
-            search_text for search_text in df if search_text is not None
-        ]
+        search_terms = [search_text for search_text in df if search_text is not None]
         return pd.DataFrame(
-            [
-                scraper.scrape(search_text)
-                for search_text in tqdm(search_terms)
-            ]
+            [scraper.scrape(search_text) for search_text in tqdm(search_terms)]
         )
 
 
-def fetch_terms_from_pubid(target: pd.DataFrame, scraper: Scraper):
+def fetch_terms_from_pubid(target: pd.DataFrame, scraper: Scraper) -> pd.DataFrame:
     df = target.explode("cited_dimensions_ids", "title")
     search_terms = [
         search_text
@@ -43,8 +43,5 @@ def fetch_terms_from_pubid(target: pd.DataFrame, scraper: Scraper):
     src_title = pd.Series(df["title"])
 
     return pd.DataFrame(
-        [
-            scraper.scrape(search_text)
-            for search_text in tqdm(search_terms)
-        ]
+        [scraper.scrape(search_text) for search_text in tqdm(search_terms)]
     ).join(src_title)

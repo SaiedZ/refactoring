@@ -11,6 +11,5 @@ class ScrapeResult:
 
 
 class Scraper(Protocol):
-
     def scrape(self, search_text: str) -> ScrapeResult:
         ...

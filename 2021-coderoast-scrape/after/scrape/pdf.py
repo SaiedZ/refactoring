@@ -8,70 +8,6 @@ from nltk.tokenize import word_tokenize
 from scrape.scraper import ScrapeResult
 
 
-TARGET_WORDS = {
-    "prosocial",
-    "design",
-    "intervention",
-    "reddit",
-    "humane",
-    "social media",
-    "user experience",
-    "nudge",
-    "choice architecture",
-    "user interface",
-    "misinformation",
-    "disinformation",
-    "Trump",
-    "conspiracy",
-    "dysinformation",
-    "users",
-    "Thaler",
-    "Sunstein",
-    "boost",
-}
-
-BYCATCH_WORDS = {
-    "psychology",
-    "pediatric",
-    "pediatry",
-    "autism",
-    "mental",
-    "medical",
-    "oxytocin",
-    "adolescence",
-    "infant",
-    "health",
-    "wellness",
-    "child",
-    "care",
-    "mindfulness",
-}
-
-RESEARCH_WORDS = {
-    "big data",
-    "data",
-    "analytics",
-    "randomized controlled trial",
-    "RCT",
-    "moderation",
-    "community",
-    "social media",
-    "conversational",
-    "control",
-    "randomized",
-    "systemic",
-    "analysis",
-    "thematic",
-    "review",
-    "study",
-    "case series",
-    "case report",
-    "double blind",
-    "ecological",
-    "survey",
-}
-
-
 def guess_doi(path_name: str) -> str:
     """Approximates a possible DOI, assuming the file is saved in YYMMDD_DOI.pdf format."""
     basename = path.basename(path_name)
@@ -101,6 +37,16 @@ class PDFScrape:
     and returns metrics about its composition and relevance.
     """
 
+    def __init__(
+        self, research_words: str, bycatch_words: str, target_words: str
+    ) -> None:
+        with open(research_words) as f:
+            self.research_words = set(f.readlines())
+        with open(bycatch_words) as f:
+            self.bycatch_words = set(f.readlines())
+        with open(target_words) as f:
+            self.target_words = set(f.readlines())
+
     def scrape(self, search_text: str) -> ScrapeResult:
         preprints = []
         with pdfplumber.open(search_text) as study:
@@ -125,12 +71,12 @@ class PDFScrape:
             all_words = compute_filtered_tokens(postprints)
 
             doi = guess_doi(search_text)
-            target_words = TARGET_WORDS.intersection(all_words)
-            bycatch_words = BYCATCH_WORDS.intersection(all_words)
+            target_words = self.target_words.intersection(all_words)
+            bycatch_words = self.bycatch_words.intersection(all_words)
+            research_intersection = self.research_words.intersection(all_words)
             word_score = len(target_words) - len(bycatch_words)
-            research_word_intersection = RESEARCH_WORDS.intersection(all_words)
             frequency = most_common_words(all_words, 5)
-            study_design = most_common_words(research_word_intersection, 3)
+            study_design = most_common_words(research_intersection, 3)
 
             return ScrapeResult(
                 doi=doi,
